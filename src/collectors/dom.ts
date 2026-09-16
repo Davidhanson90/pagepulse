@@ -26,7 +26,7 @@ export function createDomCollector(): Collector {
   return {
     name: "dom",
     start() {
-      // sampled on interval
+      // sampled on interval (tracker tick runs outside Zone when present)
     },
     sample(ctx) {
       try {

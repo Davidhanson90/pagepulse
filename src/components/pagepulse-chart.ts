@@ -2,6 +2,7 @@ import { LitElement, html } from "lit";
 import type { MetricPoint } from "../core/types.js";
 import { chartStyles, themeStyles } from "./styles.js";
 import { THEME_VARS, readThemeColor, type PagepulseTheme } from "./theme.js";
+import { wrapOutsideZone } from "../core/zone-safe.js";
 
 export class PagepulseChart extends LitElement {
   static properties = {
@@ -19,9 +20,9 @@ export class PagepulseChart extends LitElement {
   static styles = [themeStyles, chartStyles];
 
   private schemeQuery: MediaQueryList | null = null;
-  private readonly onSchemeChange = (): void => {
+  private readonly onSchemeChange = wrapOutsideZone((): void => {
     this.draw();
-  };
+  });
 
   constructor() {
     super();

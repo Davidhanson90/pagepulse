@@ -13,6 +13,7 @@ import { createConnectionCollector } from '../collectors/connection.js';
 import { createNavigationCollector } from '../collectors/navigation.js';
 import { createErrorsCollector } from '../collectors/errors.js';
 import { createResourcesWaterfallCollector } from '../collectors/resources-waterfall.js';
+import { runOutsideZone, zoneSafeClearInterval, zoneSafeSetInterval } from './zone-safe.js';
 
 const DEFAULT_COLLECTORS: Required<CollectorOptions> = {
   http: true,
@@ -52,23 +53,26 @@ export class PagepulseTracker {
     if (this.running) return;
     this.running = true;
     this.collectors = this.buildCollectors();
-    const ctx = this.createContext();
-    for (const c of this.collectors) {
-      try {
-        c.start(ctx);
-      } catch {
-        // fail soft
+    // Schedule collectors + sample loop outside Angular's zone when Zone.js is present.
+    runOutsideZone(() => {
+      const ctx = this.createContext();
+      for (const c of this.collectors) {
+        try {
+          c.start(ctx);
+        } catch {
+          // fail soft
+        }
       }
-    }
-    this.timer = setInterval(() => this.tick(), this.sampleIntervalMs);
-    this.tick();
+      this.timer = zoneSafeSetInterval(() => this.tick(), this.sampleIntervalMs);
+      this.tick();
+    });
   }
 
   stop(): void {
     if (!this.running) return;
     this.running = false;
     if (this.timer) {
-      clearInterval(this.timer);
+      zoneSafeClearInterval(this.timer);
       this.timer = null;
     }
     for (const c of this.collectors) {

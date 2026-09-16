@@ -1,4 +1,5 @@
 import type { Collector, CollectorContext } from '../core/types.js';
+import { runOutsideZone, wrapOutsideZone } from '../core/zone-safe.js';
 
 type EffectiveType = 'slow-2g' | '2g' | '3g' | '4g' | string;
 
@@ -43,20 +44,26 @@ export function createConnectionCollector(): Collector {
   return {
     name: 'connection',
     start(ctx) {
-      ctxRef = ctx;
-      try {
-        const nav = navigator as Navigator & { connection?: NetworkInformation; mozConnection?: NetworkInformation; webkitConnection?: NetworkInformation };
-        conn = nav.connection ?? nav.mozConnection ?? nav.webkitConnection ?? null;
-        if (!conn) return;
-        readConnection(ctx, conn);
-        onChange = () => {
-          if (ctxRef && conn) readConnection(ctxRef, conn);
-        };
-        conn.addEventListener('change', onChange);
-      } catch {
-        conn = null;
-        onChange = null;
-      }
+      runOutsideZone(() => {
+        ctxRef = ctx;
+        try {
+          const nav = navigator as Navigator & {
+            connection?: NetworkInformation;
+            mozConnection?: NetworkInformation;
+            webkitConnection?: NetworkInformation;
+          };
+          conn = nav.connection ?? nav.mozConnection ?? nav.webkitConnection ?? null;
+          if (!conn) return;
+          readConnection(ctx, conn);
+          onChange = wrapOutsideZone(() => {
+            if (ctxRef && conn) readConnection(ctxRef, conn);
+          });
+          conn.addEventListener('change', onChange);
+        } catch {
+          conn = null;
+          onChange = null;
+        }
+      });
     },
     sample(ctx) {
       if (conn) readConnection(ctx, conn);

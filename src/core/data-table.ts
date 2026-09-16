@@ -4,6 +4,7 @@ import type { MetricName, MetricPoint, SeriesMap, Snapshot } from "./types.js";
 import { ALL_METRIC_NAMES } from "./types.js";
 import type { ResourceTimingRow } from "./resources.js";
 import { describeMetric } from "../components/metric-info.js";
+import { zoneSafeSetTimeout } from "./zone-safe.js";
 
 /** Cell value suitable for JSON/CSV tables. */
 export type DataTableCell = string | number | boolean | null;
@@ -203,7 +204,7 @@ export function downloadData(data: unknown, options: DownloadOptions): boolean {
     a.click();
     a.remove();
     // Revoke on next tick so the browser can start the download.
-    setTimeout(() => {
+    zoneSafeSetTimeout(() => {
       try {
         urlApi.revokeObjectURL(url);
       } catch {

@@ -1,4 +1,5 @@
 import type { Collector, CollectorContext } from '../core/types.js';
+import { runOutsideZone, wrapOutsideZone } from '../core/zone-safe.js';
 
 export function createNavigationCollector(): Collector {
   const observers: PerformanceObserver[] = [];
@@ -12,9 +13,11 @@ export function createNavigationCollector(): Collector {
   const observe = (type: string, buffered: boolean, handler: (entry: PerformanceEntry) => void) => {
     if (typeof PerformanceObserver === 'undefined') return;
     try {
-      const po = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) handler(entry);
-      });
+      const po = new PerformanceObserver(
+        wrapOutsideZone((list: PerformanceObserverEntryList) => {
+          for (const entry of list.getEntries()) handler(entry);
+        })
+      );
       po.observe({ type, buffered });
       observers.push(po);
     } catch {
@@ -43,51 +46,53 @@ export function createNavigationCollector(): Collector {
 
     history.pushState = (...args: Parameters<History['pushState']>) => {
       const result = originalPushState!.apply(history, args);
-      markSoftNav('history');
+      runOutsideZone(() => markSoftNav('history'));
       return result;
     };
     history.replaceState = (...args: Parameters<History['replaceState']>) => {
       const result = originalReplaceState!.apply(history, args);
-      markSoftNav('history');
+      runOutsideZone(() => markSoftNav('history'));
       return result;
     };
 
-    onPopState = () => markSoftNav('history');
+    onPopState = wrapOutsideZone(() => markSoftNav('history')) as (ev: PopStateEvent) => void;
     window.addEventListener('popstate', onPopState);
   };
 
   return {
     name: 'navigation',
     start(ctx) {
-      ctxRef = ctx;
-      softNavCount = 0;
-      softNavStart = 0;
-      ctx.setGauge('softNavCount', 0);
+      runOutsideZone(() => {
+        ctxRef = ctx;
+        softNavCount = 0;
+        softNavStart = 0;
+        ctx.setGauge('softNavCount', 0);
 
-      try {
-        const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
-        if (nav) {
-          if (nav.domContentLoadedEventEnd > 0) {
-            ctx.setGauge('navDomContentLoaded', nav.domContentLoadedEventEnd);
+        try {
+          const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+          if (nav) {
+            if (nav.domContentLoadedEventEnd > 0) {
+              ctx.setGauge('navDomContentLoaded', nav.domContentLoadedEventEnd);
+            }
+            if (nav.loadEventEnd > 0) {
+              ctx.setGauge('navLoad', nav.loadEventEnd);
+            }
           }
-          if (nav.loadEventEnd > 0) {
-            ctx.setGauge('navLoad', nav.loadEventEnd);
-          }
+        } catch {
+          // fail soft
         }
-      } catch {
-        // fail soft
-      }
 
-      observe('soft-navigations', true, (entry) => {
-        const duration = entry.duration > 0 ? entry.duration : undefined;
-        markSoftNav('observer', duration);
+        observe('soft-navigations', true, (entry) => {
+          const duration = entry.duration > 0 ? entry.duration : undefined;
+          markSoftNav('observer', duration);
+        });
+
+        try {
+          hookHistory();
+        } catch {
+          // fail soft
+        }
       });
-
-      try {
-        hookHistory();
-      } catch {
-        // fail soft
-      }
     },
     stop() {
       for (const po of observers) {

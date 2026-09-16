@@ -8,7 +8,9 @@ interface PerformanceMemory {
 export function createMemoryCollector(): Collector {
   return {
     name: "memory",
-    start() {},
+    start() {
+      // sampled on interval (tracker tick runs outside Zone when present)
+    },
     sample(ctx) {
       try {
         const mem = (performance as Performance & { memory?: PerformanceMemory }).memory;
