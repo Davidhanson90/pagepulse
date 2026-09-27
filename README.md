@@ -30,6 +30,14 @@ Then open the local URL shown in your terminal (Vite default is usually `http://
 - Dark / light / auto theming via a `theme` attribute and `--pagepulse-*` CSS variables
 - Soft-failing collectors when browser APIs are unavailable
 
+
+## Angular / Zone.js
+
+When [Zone.js](https://github.com/angular/angular/tree/main/packages/zone.js) is present (typical Angular apps), pagepulse schedules its sample loop, timers, `requestAnimationFrame`, `PerformanceObserver` callbacks, and related event handlers **outside** Angular’s zone (`Zone.root` / unpatched timer symbols). That avoids thrashing change detection on every metric tick.
+
+- **No `zone.js` or `@angular/core` dependency** — detection is optional via `globalThis.Zone` only.
+- App code that `subscribe()`s from inside an Angular component may still want `NgZone.runOutsideAngular(...)` around its own handlers if those handlers update Angular state frequently.
+
 ## Installation
 
 ```bash

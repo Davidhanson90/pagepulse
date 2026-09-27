@@ -1,4 +1,5 @@
 import type { Collector, CollectorContext } from '../core/types.js';
+import { runOutsideZone, wrapOutsideZone } from '../core/zone-safe.js';
 
 export function createErrorsCollector(): Collector {
   let errorCount = 0;
@@ -15,24 +16,26 @@ export function createErrorsCollector(): Collector {
   return {
     name: 'errors',
     start(ctx) {
-      ctxRef = ctx;
-      errorCount = 0;
-      rejectionCount = 0;
-      publish();
-
-      if (typeof window === 'undefined') return;
-
-      onError = () => {
-        errorCount += 1;
+      runOutsideZone(() => {
+        ctxRef = ctx;
+        errorCount = 0;
+        rejectionCount = 0;
         publish();
-      };
-      onRejection = () => {
-        rejectionCount += 1;
-        publish();
-      };
 
-      window.addEventListener('error', onError);
-      window.addEventListener('unhandledrejection', onRejection);
+        if (typeof window === 'undefined') return;
+
+        onError = wrapOutsideZone(() => {
+          errorCount += 1;
+          publish();
+        }) as (ev: ErrorEvent) => void;
+        onRejection = wrapOutsideZone(() => {
+          rejectionCount += 1;
+          publish();
+        }) as (ev: PromiseRejectionEvent) => void;
+
+        window.addEventListener('error', onError);
+        window.addEventListener('unhandledrejection', onRejection);
+      });
     },
     sample(ctx) {
       ctx.setGauge('errorCount', errorCount);

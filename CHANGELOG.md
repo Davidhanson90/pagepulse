@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Zone.js-safe scheduling** — `src/core/zone-safe.ts` runs timers/observers outside Angular’s zone when Zone is present; no `zone.js` / `@angular/core` dependency
 - **Raw data table + download** — `snapshotToTable` / `seriesToTable` / `resourcesToTable`, `tableToCsv` / `downloadData`, and tracker helpers `getDataTable` / `getSeriesTable` / `getResourcesTable`
 - Lit component `<pagepulse-data-table>` (scrollable metrics table, Metrics/Resources tabs, Download JSON / CSV, `theme` support)
 - Harness checkbox **Show raw data table** with download controls

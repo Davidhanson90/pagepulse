@@ -4,6 +4,7 @@ import {
   rowFromPerformanceEntry,
   type ResourceTimingRow
 } from '../core/resources.js';
+import { runOutsideZone, wrapOutsideZone } from '../core/zone-safe.js';
 
 export interface ResourcesWaterfallCollectorOptions {
   store: ResourceStore;
@@ -49,44 +50,50 @@ export function createResourcesWaterfallCollector(
     name: 'resources-waterfall',
     start(ctx) {
       void ctx;
-      seen.clear();
+      runOutsideZone(() => {
+        seen.clear();
 
-      if (typeof PerformanceObserver !== 'undefined') {
-        try {
-          observer = new PerformanceObserver((list) => {
-            for (const entry of list.getEntries()) {
-              ingest(entry as PerformanceResourceTiming);
-            }
-          });
-          observer.observe({ type: 'resource', buffered: true });
-        } catch {
-          observer = null;
-        }
-
-        if (clearOnSoftNav) {
+        if (typeof PerformanceObserver !== 'undefined') {
           try {
-            softNavObserver = new PerformanceObserver(() => {
-              clearBuffer();
-            });
-            softNavObserver.observe({ type: 'soft-navigations', buffered: false });
+            observer = new PerformanceObserver(
+              wrapOutsideZone((list: PerformanceObserverEntryList) => {
+                for (const entry of list.getEntries()) {
+                  ingest(entry as PerformanceResourceTiming);
+                }
+              })
+            );
+            observer.observe({ type: 'resource', buffered: true });
           } catch {
-            softNavObserver = null;
+            observer = null;
+          }
+
+          if (clearOnSoftNav) {
+            try {
+              softNavObserver = new PerformanceObserver(
+                wrapOutsideZone(() => {
+                  clearBuffer();
+                })
+              );
+              softNavObserver.observe({ type: 'soft-navigations', buffered: false });
+            } catch {
+              softNavObserver = null;
+            }
           }
         }
-      }
 
-      // Seed from the existing resource timeline when available
-      try {
-        const existing = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
-        for (const entry of existing) ingest(entry);
-      } catch {
-        // fail soft
-      }
+        // Seed from the existing resource timeline when available
+        try {
+          const existing = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+          for (const entry of existing) ingest(entry);
+        } catch {
+          // fail soft
+        }
 
-      if (clearOnSoftNav && typeof window !== 'undefined') {
-        onPopState = () => clearBuffer();
-        window.addEventListener('popstate', onPopState);
-      }
+        if (clearOnSoftNav && typeof window !== 'undefined') {
+          onPopState = wrapOutsideZone(() => clearBuffer());
+          window.addEventListener('popstate', onPopState);
+        }
+      });
     },
     stop() {
       observer?.disconnect();

@@ -1,4 +1,5 @@
 import type { Collector, CollectorContext } from '../core/types.js';
+import { runOutsideZone, wrapOutsideZone } from '../core/zone-safe.js';
 
 type ResourceType = "script" | "css" | "img" | "fetch" | "other";
 
@@ -43,55 +44,59 @@ export function createHttpCollector(): Collector {
   return {
     name: "http",
     start(ctx) {
-      ctxRef = ctx;
-      ctx.setGauge("httpInFlight", 0);
+      runOutsideZone(() => {
+        ctxRef = ctx;
+        ctx.setGauge("httpInFlight", 0);
 
-      if (typeof PerformanceObserver !== "undefined") {
-        try {
-          observer = new PerformanceObserver((list) => {
-            for (const entry of list.getEntries()) {
-              onResource(entry as PerformanceResourceTiming);
-            }
-          });
-          observer.observe({ type: "resource", buffered: true });
-        } catch {
-          observer = null;
-        }
-      }
-
-      if (typeof fetch === "function") {
-        originalFetch = fetch;
-        const bound = originalFetch.bind(globalThis);
-        globalThis.fetch = async (...args: Parameters<typeof fetch>) => {
-          bumpInFlight(1);
+        if (typeof PerformanceObserver !== "undefined") {
           try {
-            return await bound(...args);
-          } finally {
-            bumpInFlight(-1);
+            observer = new PerformanceObserver(
+              wrapOutsideZone((list: PerformanceObserverEntryList) => {
+                for (const entry of list.getEntries()) {
+                  onResource(entry as PerformanceResourceTiming);
+                }
+              })
+            );
+            observer.observe({ type: "resource", buffered: true });
+          } catch {
+            observer = null;
           }
-        };
-      }
+        }
 
-      if (typeof XMLHttpRequest !== "undefined") {
-        xhrOpen = XMLHttpRequest.prototype.open;
-        xhrSend = XMLHttpRequest.prototype.send;
-        XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, ...args: unknown[]) {
-          (this as XMLHttpRequest & { __veTracked?: boolean }).__veTracked = true;
-          return xhrOpen!.apply(this, args as never);
-        } as typeof XMLHttpRequest.prototype.open;
-        XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ...args: unknown[]) {
-          const xhr = this as XMLHttpRequest & { __veTracked?: boolean };
-          if (xhr.__veTracked) {
-            bumpInFlight(1);
-            const done = () => {
-              xhr.removeEventListener("loadend", done);
-              bumpInFlight(-1);
-            };
-            xhr.addEventListener("loadend", done);
-          }
-          return xhrSend!.apply(this, args as never);
-        } as typeof XMLHttpRequest.prototype.send;
-      }
+        if (typeof fetch === "function") {
+          originalFetch = fetch;
+          const bound = originalFetch.bind(globalThis);
+          globalThis.fetch = async (...args: Parameters<typeof fetch>) => {
+            runOutsideZone(() => bumpInFlight(1));
+            try {
+              return await bound(...args);
+            } finally {
+              runOutsideZone(() => bumpInFlight(-1));
+            }
+          };
+        }
+
+        if (typeof XMLHttpRequest !== "undefined") {
+          xhrOpen = XMLHttpRequest.prototype.open;
+          xhrSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, ...args: unknown[]) {
+            (this as XMLHttpRequest & { __veTracked?: boolean }).__veTracked = true;
+            return xhrOpen!.apply(this, args as never);
+          } as typeof XMLHttpRequest.prototype.open;
+          XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, ...args: unknown[]) {
+            const xhr = this as XMLHttpRequest & { __veTracked?: boolean };
+            if (xhr.__veTracked) {
+              runOutsideZone(() => bumpInFlight(1));
+              const done = wrapOutsideZone(() => {
+                xhr.removeEventListener("loadend", done);
+                bumpInFlight(-1);
+              });
+              xhr.addEventListener("loadend", done);
+            }
+            return xhrSend!.apply(this, args as never);
+          } as typeof XMLHttpRequest.prototype.send;
+        }
+      });
     },
     sample(ctx) {
       ctx.setGauge("httpInFlight", inFlight);
