@@ -14,6 +14,8 @@ describe("zone-safe", () => {
   const g = globalThis as Record<string, unknown>;
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     delete g.Zone;
     delete g.__zone_symbol__setInterval;
     delete g.__zone_symbol__clearInterval;
@@ -131,6 +133,105 @@ describe("zone-safe", () => {
       g.__zone_symbol__cancelAnimationFrame = nativeCancel;
       zoneSafeCancelAnimationFrame(3);
       expect(nativeCancel).toHaveBeenCalledWith(3);
+    });
+  });
+
+  describe("guard branches", () => {
+    it("clear helpers ignore null and undefined ids", () => {
+      expect(() => {
+        zoneSafeClearInterval(null);
+        zoneSafeClearInterval(undefined);
+        zoneSafeClearTimeout(null);
+        zoneSafeClearTimeout(undefined);
+        zoneSafeCancelAnimationFrame(null);
+        zoneSafeCancelAnimationFrame(undefined);
+      }).not.toThrow();
+    });
+
+    it("timer helpers default the timeout to 0", () => {
+      // Mock the unpatched natives so no real 0ms interval is scheduled
+      // (a zero-delay interval would spin fake timers indefinitely).
+      const nativeSetInterval = vi.fn(() => 1 as unknown as ReturnType<typeof setInterval>);
+      const nativeSetTimeout = vi.fn(() => 2 as unknown as ReturnType<typeof setTimeout>);
+      g.__zone_symbol__setInterval = nativeSetInterval;
+      g.__zone_symbol__setTimeout = nativeSetTimeout;
+      const handler = vi.fn();
+      zoneSafeSetInterval(handler);
+      expect(nativeSetInterval).toHaveBeenCalledWith(handler, 0);
+      zoneSafeSetTimeout(handler);
+      expect(nativeSetTimeout).toHaveBeenCalledWith(handler, 0);
+    });
+  });
+
+  describe("unpatched symbol fallback branches", () => {
+    it("falls back to global timers when the zone symbol is not a function", () => {
+      g.__zone_symbol__setInterval = "not-a-function";
+      g.Zone = {};
+      vi.useFakeTimers();
+      const spy = vi.fn();
+      zoneSafeSetInterval(spy, 10);
+      vi.advanceTimersByTime(10);
+      expect(spy).toHaveBeenCalledOnce();
+    });
+
+    it("falls back to global timers when Zone.__symbol__ resolves to a non-function", () => {
+      const customKey = "__empty_symbol_setInterval";
+      g.Zone = { __symbol__: () => customKey };
+      g[customKey] = {};
+      vi.useFakeTimers();
+      const spy = vi.fn();
+      zoneSafeSetInterval(spy, 10);
+      vi.advanceTimersByTime(10);
+      expect(spy).toHaveBeenCalledOnce();
+      delete g[customKey];
+    });
+
+    it("falls back to global timers when Zone has no __symbol__", () => {
+      g.Zone = { root: { run: <T>(fn: () => T) => fn() } };
+      vi.useFakeTimers();
+      const spy = vi.fn();
+      zoneSafeSetTimeout(spy, 5);
+      vi.advanceTimersByTime(5);
+      expect(spy).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("Zone.root fallbacks", () => {
+    it("runOutsideZone invokes fn directly when Zone has no root", () => {
+      g.Zone = {};
+      const fn = vi.fn(() => 1);
+      expect(runOutsideZone(fn)).toBe(1);
+      expect(fn).toHaveBeenCalledOnce();
+    });
+
+    it("runOutsideZone invokes fn directly when root.run is not a function", () => {
+      g.Zone = { root: {} };
+      const fn = vi.fn(() => 2);
+      expect(runOutsideZone(fn)).toBe(2);
+      expect(fn).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe("non-browser rAF fallbacks", () => {
+    // Restrict toFake so fake timers do not reinstall requestAnimationFrame /
+    // cancelAnimationFrame over the undefined stubs below.
+    it("zoneSafeRequestAnimationFrame schedules via setTimeout without rAF", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      vi.stubGlobal("requestAnimationFrame", undefined);
+      const cb = vi.fn();
+      zoneSafeRequestAnimationFrame(cb);
+      vi.advanceTimersByTime(16);
+      expect(cb).toHaveBeenCalledOnce();
+      expect(cb).toHaveBeenCalledWith(Date.now());
+    });
+
+    it("zoneSafeCancelAnimationFrame clears via clearTimeout without rAF", () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      vi.stubGlobal("cancelAnimationFrame", undefined);
+      const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+      zoneSafeCancelAnimationFrame(123);
+      expect(clearSpy).toHaveBeenCalledWith(123);
+      clearSpy.mockRestore();
     });
   });
 });
