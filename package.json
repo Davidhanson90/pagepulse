@@ -1,6 +1,6 @@
 {
   "name": "pagepulse",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser performance metrics tracker with Lit web components for live graphs.",
   "type": "module",
   "main": "./dist/index.js",
